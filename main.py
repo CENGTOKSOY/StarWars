@@ -1,201 +1,191 @@
 import pgzrun
 import random
 
-# Screen dimensions (constant names capitalized)
 SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
 MID_WIDTH, MID_HEIGHT = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
+class Character:
+    def __init__(self, image_prefix, pos, speed, num_frames):
+        self.animation_frames = [f"{image_prefix}_idle_{i + 1}" for i in range(num_frames)]
+        self.actor = Actor(self.animation_frames[0], pos=pos)
+        self.current_frame = 0
+        self.frame_timer = 0
+        self.speed = speed
+    def update_animation(self):
+        self.frame_timer += 1
+        if self.frame_timer > 10:  # Adjust frame step as needed
+            self.current_frame = (self.current_frame + 1) % len(self.animation_frames)
+            self.actor.image = self.animation_frames[self.current_frame]
+            self.frame_timer = 0
 
-# Shared settings
-actor_speed_range = [1, 2]  # Reduced speed for enemies
-actor_anim_step = 10
+    def draw(self):
+        self.actor.draw()
+class Enemy(Character):
+    def __init__(self, image_prefix, pos, speed, num_frames):
+        super().__init__(image_prefix, pos, speed, num_frames)
+        self.move_direction = random.choice([(1, 0), (-1, 0), (0, 1), (0, -1)])
+        self.lasers = []  # Lasers fired by the enemy
+        self.fire_timer = random.randint(30, 100)  # Randomized fire intervals
 
-# Actor definition
-def create_actor(image_prefix, start_position, initial_speed, num_frames):
-    animation_list = [f"{image_prefix}_idle_{i+1}" for i in range(num_frames)]
-    return {
-        "actor": Actor(animation_list[0], pos=start_position),
-        "animation_frames": animation_list,
-        "current_frame": 0,
-        "frame_timer": 0,
-        "speed": initial_speed
-    }
+    def move(self):
+        self.actor.x += self.move_direction[0] * self.speed
+        self.actor.y += self.move_direction[1] * self.speed
+        if self.actor.left < 0 or self.actor.right > SCREEN_WIDTH:
+            self.move_direction = (-self.move_direction[0], self.move_direction[1])
+        if self.actor.top < 0 or self.actor.bottom > SCREEN_HEIGHT:
+            self.move_direction = (self.move_direction[0], -self.move_direction[1])
 
-# Hero definition
-hero = create_actor("hero", (MID_WIDTH, MID_HEIGHT), 3, 2)
+    def fire_laser(self):
+        self.lasers.append(Laser(self.actor.pos, direction=1))  # Fire downward
 
-# Function to create enemies
-def create_enemies(num_of_enemies):
-    list_of_enemies = []
-    for _ in range(num_of_enemies):
-        start_x = random.randint(50, SCREEN_WIDTH - 50)
-        start_y = random.randint(50, SCREEN_HEIGHT - 50)
-        speed = random.choice(actor_speed_range)
-        enemy = create_actor("enemy", (start_x, start_y), speed, 2)
-        list_of_enemies.append(enemy)
-    return list_of_enemies
+    def update_lasers(self):
+        self.fire_timer -= 1
+        if self.fire_timer <= 0:
+            self.fire_laser()
+            self.fire_timer = random.randint(60, 120)  # Reset timer
+        for laser in self.lasers[:]:
+            laser.move()
+            if laser.actor.top > SCREEN_HEIGHT:
+                self.lasers.remove(laser)
 
-# Create enemies
-enemies = create_enemies(2)
+    def draw_lasers(self):
+        for laser in self.lasers:
+            laser.draw()
 
-# Lasers
+class Laser:
+    def __init__(self, pos, direction):
+        self.actor = Actor("laser", pos=pos)
+        self.direction = direction  # -1 for upward, 1 for downward
+
+    def move(self):
+        self.actor.y += 5 * self.direction
+
+    def draw(self):
+        self.actor.draw()
+
+hero = Character("hero", (MID_WIDTH, MID_HEIGHT), speed=3, num_frames=2)
 lasers = []
-def fire_laser():
-    try:
-        laser = Actor("laser", pos=hero["actor"].pos)
-        lasers.append(laser)
-    except Exception as e:
-        print(f"Error while firing laser: {e}")
+enemies = []
 
-# Sounds and music
-sound_mapping = {
-    "game_won": sounds.win,
-    "game_lost": sounds.lose
-}
-
-# State mapping
 GAME_STATE_MAP = {"MENU": 0, "PLAYING": 1, "GAMEOVER": 2}
-CURRENT_STATE = GAME_STATE_MAP["MENU"]
-
-# Game variables
+current_state = GAME_STATE_MAP["MENU"]
 game_score = 0
+background_music_playing = False
 
-# Rendering functions
+def play_background_music():
+    global background_music_playing
+    if not background_music_playing:
+        sounds.background.play(-1)  # Loop background music
+        background_music_playing = True
+
+def stop_background_music():
+    global background_music_playing
+    if background_music_playing:
+        sounds.background.stop()
+        background_music_playing = False
+
+def spawn_enemy():
+    start_x = random.randint(50, SCREEN_WIDTH - 50)
+    start_y = random.randint(50, SCREEN_HEIGHT - 50)
+    speed = random.uniform(1.0, 2.0)  # Slower enemies
+    enemies.append(Enemy("enemy", (start_x, start_y), speed, num_frames=2))
+
+def fire_laser():
+    lasers.append(Laser(hero.actor.pos, direction=-1))  # Hero fires upward
+    sounds.laser.play()  # Play laser firing sound
+
 def render_game():
     screen.clear()
-    if CURRENT_STATE == GAME_STATE_MAP["MENU"]:
+    screen.blit("space_background", (0, 0))  # Background image
+    if current_state == GAME_STATE_MAP["MENU"]:
         _display_menu()
-    elif CURRENT_STATE == GAME_STATE_MAP["PLAYING"]:
+    elif current_state == GAME_STATE_MAP["PLAYING"]:
         _display_playing_state()
-    elif CURRENT_STATE == GAME_STATE_MAP["GAMEOVER"]:
+    elif current_state == GAME_STATE_MAP["GAMEOVER"]:
         _display_gameover()
-
 def _display_menu():
     screen.fill("darkblue")
     screen.draw.text("ROGUELIKE GAME", center=(MID_WIDTH, SCREEN_HEIGHT // 3), color="white", fontsize=50)
     screen.draw.text("1. Start Game", center=(MID_WIDTH, MID_HEIGHT), color="white", fontsize=30)
     screen.draw.text("2. Exit", center=(MID_WIDTH, MID_HEIGHT + 50), color="white", fontsize=30)
-
 def _display_playing_state():
-    # Draw the space background
-    screen.blit("space_background", (0, 0))  # Make sure "space_background" exists in images folder
-    hero["actor"].draw()
+    hero.draw()
     for enemy in enemies:
-        enemy["actor"].draw()
+        enemy.draw()
+        enemy.draw_lasers()
     for laser in lasers:
         laser.draw()
     screen.draw.text(f"Score: {game_score}", (10, 10), color="white", fontsize=24)
-
 def _display_gameover():
     screen.fill("black")
     screen.draw.text("Game Over!", center=(MID_WIDTH, MID_HEIGHT), color="red", fontsize=50)
     screen.draw.text(f"Final Score: {game_score}", center=(MID_WIDTH, MID_HEIGHT + 50), color="white", fontsize=40)
     screen.draw.text("Press ENTER to return to the menu", center=(MID_WIDTH, MID_HEIGHT + 100), color="white", fontsize=30)
+def update():
+    global current_state, game_score
+    play_background_music()
+    if current_state == GAME_STATE_MAP["PLAYING"]:
+        if keyboard.left and hero.actor.left > 0:
+            hero.actor.x -= hero.speed
+        if keyboard.right and hero.actor.right < SCREEN_WIDTH:
+            hero.actor.x += hero.speed
+        if keyboard.up and hero.actor.top > 0:
+            hero.actor.y -= hero.speed
+        if keyboard.down and hero.actor.bottom < SCREEN_HEIGHT:
+            hero.actor.y += hero.speed
 
-# Game state control
-def control_state():
-    if CURRENT_STATE == GAME_STATE_MAP["PLAYING"]:
-        _manage_hero()
-        _manage_enemies()
-        _manage_lasers()
-        _manage_collisions()
+        hero.update_animation()
 
-# Hero management
-def _manage_hero():
-    speed = hero["speed"]
-    actr = hero["actor"]
-    if keyboard.left and actr.x > 0:
-        actr.x -= speed
-    if keyboard.right and actr.x < SCREEN_WIDTH:
-        actr.x += speed
-    if keyboard.up and actr.y > 0:
-        actr.y -= speed
-    if keyboard.down and actr.y < SCREEN_HEIGHT:
-        actr.y += speed
-    _manage_animation(hero)
+        for enemy in enemies:
+            enemy.move()
+            enemy.update_animation()
+            enemy.update_lasers()
+            if enemy.actor.colliderect(hero.actor):
+                sounds.lose.play()
+                current_state = GAME_STATE_MAP["GAMEOVER"]
+                stop_background_music()
 
-# Enemy management
-def _manage_enemies():
-    for enemy in enemies:
-        enm = enemy["actor"]
-        dx = hero["actor"].x - enm.x
-        dy = hero["actor"].y - enm.y
-        dist = (dx**2 + dy**2) ** 0.5
-        speed = enemy["speed"]
-        if dist > 0:
-            enm.x += (dx / dist) * speed
-            enm.y += (dy / dist) * speed
-        _manage_animation(enemy)
+            for laser in enemy.lasers:
+                if laser.actor.colliderect(hero.actor):
+                    sounds.lose.play()
+                    current_state = GAME_STATE_MAP["GAMEOVER"]
+                    stop_background_music()
 
-# Laser management
-def _manage_lasers():
-    global game_score
-    for laser in lasers[:]:
-        laser.y -= 5  # Move laser upwards
-        if laser.y < 0:
-            lasers.remove(laser)
-        else:
-            for enemy in enemies[:]:
-                if laser.colliderect(enemy["actor"]):
-                    enemies.remove(enemy)  # Remove the hit enemy
-                    lasers.remove(laser)  # Remove the laser
-                    game_score += 10
+        for laser in lasers[:]:
+            laser.move()
+            if laser.actor.y < 0:
+                lasers.remove(laser)
+            else:
+                for enemy in enemies[:]:
+                    if laser.actor.colliderect(enemy.actor):
+                        enemies.remove(enemy)
+                        lasers.remove(laser)
+                        game_score += 10
+                        spawn_enemy()
+                        sounds.explosion.play()  # Play enemy destruction sound
+                        if game_score % 200 == 0:  # Play win sound every 200 points
+                            sounds.win.play()
 
-                    # Add a new enemy when one is killed
-                    new_enemy = create_actor(
-                        "enemy",
-                        (random.randint(50, SCREEN_WIDTH - 50), random.randint(50, SCREEN_HEIGHT - 50)),
-                        random.choice(actor_speed_range),
-                        2
-                    )
-                    enemies.append(new_enemy)
-                    break
-
-# Animation management
-def _manage_animation(sprite):
-    sprite["frame_timer"] += 1
-    if sprite["frame_timer"] > actor_anim_step:
-        frames = len(sprite["animation_frames"])
-        sprite["current_frame"] = (sprite["current_frame"] + 1) % frames
-        sprite["actor"].image = sprite["animation_frames"][sprite["current_frame"]]
-        sprite["frame_timer"] = 0
-
-# Collision management
-def _manage_collisions():
-    global CURRENT_STATE
-    for enemy in enemies:
-        if hero["actor"].colliderect(enemy["actor"]):
-            CURRENT_STATE = GAME_STATE_MAP["GAMEOVER"]
-            sound_mapping["game_lost"].play()
-
-# Keyboard input management
-def manage_keyboard_inputs(key):
-    global CURRENT_STATE
-    if CURRENT_STATE == GAME_STATE_MAP["MENU"]:
+        if len(enemies) < 2:
+            spawn_enemy()
+def on_key_down(key):
+    global current_state
+    if current_state == GAME_STATE_MAP["MENU"]:
         if key == keys.K_1:
-            _game_begin()
+            _start_game()
         elif key == keys.K_2:
             exit()
-    elif CURRENT_STATE == GAME_STATE_MAP["GAMEOVER"] and key == keys.RETURN:
-        CURRENT_STATE = GAME_STATE_MAP["MENU"]
-    elif key == keys.SPACE and CURRENT_STATE == GAME_STATE_MAP["PLAYING"]:  # Lazer fırlatma
+    elif current_state == GAME_STATE_MAP["GAMEOVER"] and key == keys.RETURN:
+        current_state = GAME_STATE_MAP["MENU"]
+    elif key == keys.SPACE and current_state == GAME_STATE_MAP["PLAYING"]:
         fire_laser()
-
-def _game_begin():
-    global CURRENT_STATE, game_score
-    CURRENT_STATE = GAME_STATE_MAP["PLAYING"]
+def _start_game():
+    global current_state, game_score, enemies
+    current_state = GAME_STATE_MAP["PLAYING"]
     game_score = 0
-    hero["actor"].pos = (MID_WIDTH, MID_HEIGHT)
-    for enemy in enemies:
-        enemy["actor"].pos = (random.randint(50, SCREEN_WIDTH - 50), random.randint(50, SCREEN_HEIGHT - 50))
-
-# Pygame Zero functions
+    hero.actor.pos = (MID_WIDTH, MID_HEIGHT)
+    enemies = []
+    for _ in range(3):
+        spawn_enemy()
 def draw():
     render_game()
-
-def update():
-    control_state()
-
-def on_key_down(key):
-    manage_keyboard_inputs(key)
-
 pgzrun.go()
